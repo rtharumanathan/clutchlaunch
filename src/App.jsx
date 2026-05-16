@@ -753,15 +753,31 @@ function AICoach() {
   const cats = ["All", ...new Set(AI_COACH_SCENARIOS.map(s=>s.category))];
   const filtered = filter==="All"?AI_COACH_SCENARIOS:AI_COACH_SCENARIOS.filter(s=>s.category===filter);
   const ask = async (sc, ctx) => {
-    setLoading(true); setResp("");
-    const contextBlock = ctx ? `\n\nRelevant CLUTCH Steps of Service context for this scenario:\n${ctx}` : "";
-    try {
-      const r = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400, system: COACH_SYSTEM_PROMPT, messages:[{role:"user",content:`Scenario: ${sc}${contextBlock}\n\nHow should I handle this? Be concise.`}] }) });
-      const d = await r.json();
-      setResp(d.content?.map(i=>i.text||"").join("\n")||"No response received.");
-    } catch { setResp("Couldn't reach the AI coach right now. Try again in a moment."); }
-    setLoading(false);
-  };
+  setLoading(true); setResp("");
+  const contextBlock = ctx ? `\n\nRelevant CLUTCH Steps of Service context for this scenario:\n${ctx}` : "";
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 400,
+        system: COACH_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: `Scenario: ${sc}${contextBlock}\n\nHow should I handle this? Be concise.` }]
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      // Anthropic returned an error — show the actual message
+      setResp(`API error ${r.status}: ${d.error?.message || JSON.stringify(d)}`);
+    } else {
+      setResp(d.content?.map(i => i.text || "").join("\n") || "No response received.");
+    }
+  } catch (err) {
+    setResp(`Network error: ${err.message}`);
+  }
+  setLoading(false);
+};
   return (
     <div>
       <div style={{ fontSize:13, color:"#5B6B7D", marginBottom:20, lineHeight:1.55, fontWeight:500 }}>Select a scenario or describe your own. The AI coach gives guidance grounded in the Clutch Steps of Service (C-L-U-T-C-H) and AAA escalation framework.</div>
