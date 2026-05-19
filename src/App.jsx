@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "./lib/supabase";
 
 const STORE_KEY = "clutch-launch-v1";
 
@@ -282,25 +281,8 @@ No preamble. No filler. Direct and real.`;
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
 const deepClone = o => JSON.parse(JSON.stringify(o));
-const loadState = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('launch_states')
-      .select('data')
-      .eq('id', STORE_KEY)
-      .maybeSingle();
-    if (error || !data) return null;
-    return data.data;
-  } catch { return null; }
-};
-
-const saveState = async s => {
-  try {
-    await supabase
-      .from('launch_states')
-      .upsert({ id: STORE_KEY, data: s, updated_at: new Date().toISOString() });
-  } catch {}
-};
+const loadState = async () => { try { const r = await window.storage.get(STORE_KEY); return r ? JSON.parse(r.value) : null; } catch { return null; } };
+const saveState = async s => { try { await window.storage.set(STORE_KEY, JSON.stringify(s)); } catch {} };
 
 // ─── SVG Icons ───────────────────────────────────────────────────────────────
 
@@ -771,31 +753,15 @@ function AICoach() {
   const cats = ["All", ...new Set(AI_COACH_SCENARIOS.map(s=>s.category))];
   const filtered = filter==="All"?AI_COACH_SCENARIOS:AI_COACH_SCENARIOS.filter(s=>s.category===filter);
   const ask = async (sc, ctx) => {
-  setLoading(true); setResp("");
-  const contextBlock = ctx ? `\n\nRelevant CLUTCH Steps of Service context for this scenario:\n${ctx}` : "";
-  try {
-    const r = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 400,
-        system: COACH_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: `Scenario: ${sc}${contextBlock}\n\nHow should I handle this? Be concise.` }]
-      })
-    });
-    const d = await r.json();
-    if (!r.ok) {
-      // Anthropic returned an error — show the actual message
-      setResp(`API error ${r.status}: ${d.error?.message || JSON.stringify(d)}`);
-    } else {
-      setResp(d.content?.map(i => i.text || "").join("\n") || "No response received.");
-    }
-  } catch (err) {
-    setResp(`Network error: ${err.message}`);
-  }
-  setLoading(false);
-};
+    setLoading(true); setResp("");
+    const contextBlock = ctx ? `\n\nRelevant CLUTCH Steps of Service context for this scenario:\n${ctx}` : "";
+    try {
+      const r = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:400, system: COACH_SYSTEM_PROMPT, messages:[{role:"user",content:`Scenario: ${sc}${contextBlock}\n\nHow should I handle this? Be concise.`}] }) });
+      const d = await r.json();
+      setResp(d.content?.map(i=>i.text||"").join("\n")||"No response received.");
+    } catch { setResp("Couldn't reach the AI coach right now. Try again in a moment."); }
+    setLoading(false);
+  };
   return (
     <div>
       <div style={{ fontSize:13, color:"#5B6B7D", marginBottom:20, lineHeight:1.55, fontWeight:500 }}>Select a scenario or describe your own. The AI coach gives guidance grounded in the Clutch Steps of Service (C-L-U-T-C-H) and AAA escalation framework.</div>
@@ -1466,7 +1432,7 @@ const DEFAULT_GANTT_TASKS = [
   { id:"g16", task:"OPENING DAY", category:"Launch", startDay:0, duration:1, raci:{ r:"", a:"", c:"", i:"" }, done:false },
 ];
 
-function GanttRACI({ data, setData, teamRoster }) {
+function GanttRACI({ data, setData, teamRoster, openingDate, setOpeningDate }) {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ task:"", category:"Facility", startDay:0, duration:1 });
@@ -1474,6 +1440,16 @@ function GanttRACI({ data, setData, teamRoster }) {
   const categories = [...new Set(data.map(t => t.category))];
   const catColors = { Facility:"#E53935", Technology:"#2D6CC0", Inventory:"#C07B06", Customer:"#7B2D8E", Training:"#1A8F38", Compliance:"#5B6B7D", Launch:"#E53935" };
   const getCatColor = (cat) => catColors[cat] || "#E53935";
+
+  // Convert day-relative offset to a calendar date string based on opening date
+  const dayToDate = (dayOffset) => {
+    if (!openingDate) return null;
+    const d = new Date(openingDate + "T00:00:00");
+    d.setDate(d.getDate() + dayOffset);
+    return d;
+  };
+  const fmtDate = (d) => d ? d.toLocaleDateString(undefined, { month:"short", day:"numeric" }) : "";
+  const fmtDateFull = (d) => d ? d.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric", year:"numeric" }) : "";
 
   const minDay = Math.min(...data.map(t => t.startDay), -14);
   const maxDay = Math.max(...data.map(t => t.startDay + t.duration), 2);
@@ -1501,8 +1477,15 @@ function GanttRACI({ data, setData, teamRoster }) {
 
   return (
     <div>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-        <div style={{ fontSize:13, color:"#5B6B7D", fontWeight:500 }}>Day-relative timeline for your store launch. Day 0 = Opening Day.</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, flexWrap:"wrap", gap:12 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
+          <div style={{ fontSize:13, color:"#5B6B7D", fontWeight:500 }}>Day 0 = Opening Day.</div>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:"#1A2332" }}>Opening Date:</label>
+            <input type="date" value={openingDate} onChange={e => setOpeningDate(e.target.value)} style={{...S.input, padding:"6px 10px", fontSize:13, width:"auto"}} />
+            {openingDate && <span style={{ fontSize:12, color:"#5B6B7D" }}>({fmtDateFull(dayToDate(0))})</span>}
+          </div>
+        </div>
         <button onClick={() => { setAdding(true); setEditing(null); setForm({ task:"", category:"Facility", startDay:0, duration:1 }); }} style={S.btnPrimary}>{I.plus} Add Task</button>
       </div>
 
@@ -1518,6 +1501,21 @@ function GanttRACI({ data, setData, teamRoster }) {
             <div><label style={S.label}>Duration (days)</label><input type="number" min="1" value={form.duration} onChange={e => setForm({...form, duration: Math.max(1, parseInt(e.target.value)||1)})} style={S.input} /></div>
           </div>
           <div style={{ display:"flex", gap:8 }}><button onClick={addTask} style={S.btnPrimary}>Add Task</button><button onClick={() => setAdding(false)} style={S.btnSecondary}>Cancel</button></div>
+        </div>
+      )}
+
+      {editing && (
+        <div className="fade-up" style={{ padding:20, borderRadius:16, background:"#FFFFFF", border:"1.5px solid #DCE3EB", marginBottom:20, boxShadow:"0 2px 8px rgba(0,0,0,0.06)" }}>
+          <div style={{ fontSize:14, fontWeight:700, color:"#1A2332", marginBottom:14 }}>Edit Task</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 120px", gap:12, marginBottom:12 }}>
+            <div><label style={S.label}>Task Name</label><input autoFocus value={form.task} onChange={e => setForm({...form, task: e.target.value})} onKeyDown={e => e.key==="Enter" && saveEdit(editing)} style={S.input} /></div>
+            <div><label style={S.label}>Category</label><select value={form.category} onChange={e => setForm({...form, category: e.target.value})} style={{...S.input, cursor:"pointer"}}>{["Facility","Technology","Inventory","Customer","Training","Compliance","Launch"].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+            <div><label style={S.label}>Start (days from opening, negative = before)</label><input type="number" value={form.startDay} onChange={e => setForm({...form, startDay: parseInt(e.target.value)||0})} style={S.input} /></div>
+            <div><label style={S.label}>Duration (days)</label><input type="number" min="1" value={form.duration} onChange={e => setForm({...form, duration: Math.max(1, parseInt(e.target.value)||1)})} style={S.input} /></div>
+          </div>
+          <div style={{ display:"flex", gap:8 }}><button onClick={() => saveEdit(editing)} style={S.btnPrimary}>Save Changes</button><button onClick={() => setEditing(null)} style={S.btnSecondary}>Cancel</button></div>
         </div>
       )}
 
@@ -1539,7 +1537,11 @@ function GanttRACI({ data, setData, teamRoster }) {
                 {Array.from({ length: totalDays }, (_, i) => {
                   const day = minDay + i;
                   const isOpening = day === 0;
-                  return <th key={i} style={{ padding:"10px 0", textAlign:"center", fontSize:9, fontWeight:700, color: isOpening?"#E53935":"#8B97A8", background: isOpening?"rgba(229,57,53,0.08)":"transparent", borderBottom:"1.5px solid #DCE3EB", borderRight:"1px solid #E4EAF0" }}>{day === 0 ? "DAY 0" : day > 0 ? `+${day}` : day}</th>;
+                  const cellDate = dayToDate(day);
+                  return <th key={i} style={{ padding:"8px 0", textAlign:"center", fontSize:9, fontWeight:700, color: isOpening?"#E53935":"#8B97A8", background: isOpening?"rgba(229,57,53,0.08)":"transparent", borderBottom:"1.5px solid #DCE3EB", borderRight:"1px solid #E4EAF0", lineHeight:1.3 }}>
+                    <div>{day === 0 ? "DAY 0" : day > 0 ? `+${day}` : day}</div>
+                    {cellDate && <div style={{ fontSize:8, fontWeight:600, color: isOpening?"#E53935":"#5B6B7D", marginTop:2 }}>{fmtDate(cellDate)}</div>}
+                  </th>;
                 })}
               </tr>
             </thead>
@@ -1558,6 +1560,7 @@ function GanttRACI({ data, setData, teamRoster }) {
                           <div style={{ fontSize:12, fontWeight:600, color: t.done?"#8B97A8":"#1A2332", textDecoration: t.done?"line-through":"none", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{t.task}</div>
                           <div style={{ fontSize:9, fontWeight:700, color: cc, textTransform:"uppercase", marginTop:1 }}>{t.category}</div>
                         </div>
+                        <button onClick={() => { setEditing(t.id); setAdding(false); setForm({ task: t.task, category: t.category, startDay: t.startDay, duration: t.duration }); }} style={{...S.btnGhost, padding:2, flexShrink:0}}>{I.edit}</button>
                         <button onClick={() => del(t.id)} style={{...S.btnGhost, color:"#D32F2F", padding:2, flexShrink:0}}>{I.trash}</button>
                       </div>
                     </td>
@@ -1627,14 +1630,15 @@ export default function ClutchLaunchSystem() {
   const [teamRoster, setTeamRoster] = useState([]);
   const [riskData, setRiskData] = useState([]);
   const [ganttData, setGanttData] = useState(deepClone(DEFAULT_GANTT_TASKS));
+  const [openingDate, setOpeningDate] = useState("");
   const [reminders, setReminders] = useState([]);
   const [attachments, setAttachments] = useState({});
   const [showReset, setShowReset] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  useEffect(() => { (async () => { const s=await loadState(); if(s){if(s.storeName)setStoreName(s.storeName);if(s.setupData)setSetupData(s.setupData);if(s.trainingData)setTrainingData(s.trainingData);if(s.dailyData)setDailyData(s.dailyData);if(s.debriefData)setDebriefData(s.debriefData);if(s.teamRoster)setTeamRoster(s.teamRoster);if(s.riskData)setRiskData(s.riskData);if(s.ganttData)setGanttData(s.ganttData);if(s.reminders)setReminders(s.reminders);if(s.attachments)setAttachments(s.attachments);} setLoaded(true); })(); }, []);
-  useEffect(() => { if(!loaded) return; saveState({storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,reminders,attachments}); }, [storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,reminders,attachments,loaded]);
-  const handleReset = async () => { setSetupData(deepClone(DEFAULT_SETUP_CHECKLIST)); setTrainingData(deepClone(DEFAULT_TRAINING_PLAN)); setDailyData(deepClone(DEFAULT_DAILY_STRUCTURE)); setDebriefData([]); setTeamRoster([]); setRiskData([]); setGanttData(deepClone(DEFAULT_GANTT_TASKS)); setReminders([]); setAttachments({}); setStoreName(""); setShowReset(false); try{await supabase.from('launch_states').delete().eq('id', STORE_KEY);}catch{} };
+  useEffect(() => { (async () => { const s=await loadState(); if(s){if(s.storeName)setStoreName(s.storeName);if(s.setupData)setSetupData(s.setupData);if(s.trainingData)setTrainingData(s.trainingData);if(s.dailyData)setDailyData(s.dailyData);if(s.debriefData)setDebriefData(s.debriefData);if(s.teamRoster)setTeamRoster(s.teamRoster);if(s.riskData)setRiskData(s.riskData);if(s.ganttData)setGanttData(s.ganttData);if(s.openingDate)setOpeningDate(s.openingDate);if(s.reminders)setReminders(s.reminders);if(s.attachments)setAttachments(s.attachments);} setLoaded(true); })(); }, []);
+  useEffect(() => { if(!loaded) return; saveState({storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,openingDate,reminders,attachments}); }, [storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,openingDate,reminders,attachments,loaded]);
+  const handleReset = async () => { setSetupData(deepClone(DEFAULT_SETUP_CHECKLIST)); setTrainingData(deepClone(DEFAULT_TRAINING_PLAN)); setDailyData(deepClone(DEFAULT_DAILY_STRUCTURE)); setDebriefData([]); setTeamRoster([]); setRiskData([]); setGanttData(deepClone(DEFAULT_GANTT_TASKS)); setOpeningDate(""); setReminders([]); setAttachments({}); setStoreName(""); setShowReset(false); try{await window.storage.delete(STORE_KEY);}catch{} };
 
   if(!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#EEF2F7"}}><div style={{width:36,height:36,border:"3px solid #DCE3EB",borderTopColor:"#E53935",borderRadius:"50%",animation:"spin .7s linear infinite"}} /><style>{`@keyframes spin { to { transform:rotate(360deg); } }`}</style></div>;
 
@@ -1828,7 +1832,7 @@ export default function ClutchLaunchSystem() {
         {/* Page content */}
         <div className="fade-up page-content" key={page} style={{ padding:"24px 32px 48px", flex:1 }}>
           {page === "setup" && <SetupChecklist data={setupData} setData={setSetupData} teamRoster={teamRoster} />}
-          {page === "gantt" && <GanttRACI data={ganttData} setData={setGanttData} teamRoster={teamRoster} />}
+          {page === "gantt" && <GanttRACI data={ganttData} setData={setGanttData} teamRoster={teamRoster} openingDate={openingDate} setOpeningDate={setOpeningDate} />}
           {page === "team" && <TeamRoster data={teamRoster} setData={setTeamRoster} trainingData={trainingData} setupData={setupData} />}
           {page === "risks" && <RiskRegister risks={riskData} setRisks={setRiskData} debriefData={debriefData} teamRoster={teamRoster} />}
           {page === "settings" && <SetupSettings categories={setupData.map(c=>c.category)} attachments={attachments} setAttachments={setAttachments} onBack={()=>setPage("setup")} setupData={setupData} setSetupData={setSetupData} />}
