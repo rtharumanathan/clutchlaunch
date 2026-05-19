@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
+import { supabase } from "./lib/supabase";
+
 const STORE_KEY = "clutch-launch-v1";
 
 const DEFAULT_SETUP_CHECKLIST = [
@@ -281,9 +283,25 @@ No preamble. No filler. Direct and real.`;
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
 const deepClone = o => JSON.parse(JSON.stringify(o));
-const loadState = async () => { try { const r = await window.storage.get(STORE_KEY); return r ? JSON.parse(r.value) : null; } catch { return null; } };
-const saveState = async s => { try { await window.storage.set(STORE_KEY, JSON.stringify(s)); } catch {} };
+const loadState = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('launch_states')
+      .select('data')
+      .eq('id', STORE_KEY)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data.data;
+  } catch { return null; }
+};
 
+const saveState = async s => {
+  try {
+    await supabase
+      .from('launch_states')
+      .upsert({ id: STORE_KEY, data: s, updated_at: new Date().toISOString() });
+  } catch {}
+};
 // ─── SVG Icons ───────────────────────────────────────────────────────────────
 
 const I = {
@@ -1638,7 +1656,7 @@ export default function ClutchLaunchSystem() {
 
   useEffect(() => { (async () => { const s=await loadState(); if(s){if(s.storeName)setStoreName(s.storeName);if(s.setupData)setSetupData(s.setupData);if(s.trainingData)setTrainingData(s.trainingData);if(s.dailyData)setDailyData(s.dailyData);if(s.debriefData)setDebriefData(s.debriefData);if(s.teamRoster)setTeamRoster(s.teamRoster);if(s.riskData)setRiskData(s.riskData);if(s.ganttData)setGanttData(s.ganttData);if(s.openingDate)setOpeningDate(s.openingDate);if(s.reminders)setReminders(s.reminders);if(s.attachments)setAttachments(s.attachments);} setLoaded(true); })(); }, []);
   useEffect(() => { if(!loaded) return; saveState({storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,openingDate,reminders,attachments}); }, [storeName,setupData,trainingData,dailyData,debriefData,teamRoster,riskData,ganttData,openingDate,reminders,attachments,loaded]);
-  const handleReset = async () => { setSetupData(deepClone(DEFAULT_SETUP_CHECKLIST)); setTrainingData(deepClone(DEFAULT_TRAINING_PLAN)); setDailyData(deepClone(DEFAULT_DAILY_STRUCTURE)); setDebriefData([]); setTeamRoster([]); setRiskData([]); setGanttData(deepClone(DEFAULT_GANTT_TASKS)); setOpeningDate(""); setReminders([]); setAttachments({}); setStoreName(""); setShowReset(false); try{await window.storage.delete(STORE_KEY);}catch{} };
+  const handleReset = async () => { setSetupData(deepClone(DEFAULT_SETUP_CHECKLIST)); setTrainingData(deepClone(DEFAULT_TRAINING_PLAN)); setDailyData(deepClone(DEFAULT_DAILY_STRUCTURE)); setDebriefData([]); setTeamRoster([]); setRiskData([]); setGanttData(deepClone(DEFAULT_GANTT_TASKS)); setOpeningDate(""); setReminders([]); setAttachments({}); setStoreName(""); setShowReset(false); try{await supabase.from('launch_states').delete().eq('id', STORE_KEY);}catch{} };
 
   if(!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#EEF2F7"}}><div style={{width:36,height:36,border:"3px solid #DCE3EB",borderTopColor:"#E53935",borderRadius:"50%",animation:"spin .7s linear infinite"}} /><style>{`@keyframes spin { to { transform:rotate(360deg); } }`}</style></div>;
 
