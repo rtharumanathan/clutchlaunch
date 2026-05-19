@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-
 import { supabase } from "./lib/supabase";
 
 const STORE_KEY = "clutch-launch-v1";
@@ -302,6 +301,7 @@ const saveState = async s => {
       .upsert({ id: STORE_KEY, data: s, updated_at: new Date().toISOString() });
   } catch {}
 };
+
 // ─── SVG Icons ───────────────────────────────────────────────────────────────
 
 const I = {
